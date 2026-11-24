@@ -16,7 +16,7 @@ PG_VOLUME=synclead_local_pgdata
 PG_IMAGE=postgres:17-alpine
 LOCAL_DB_URL="postgres://postgres:t@127.0.0.1:${PG_PORT}/synclead"
 # Senhas só do ambiente local (banco local, sem dados reais).
-LOCAL_ADMIN_PASSWORD=admin-local-123
+LOCAL_ADMIN_PASSWORD=adm
 LOCAL_GESTOR_PASSWORD=gestor-local-123
 
 port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
@@ -55,13 +55,21 @@ api_env() { env "${API_ENV[@]}" "$@"; }
 ensure_local_users() {
   cd "$ROOT/api"
   local psql=(docker exec "$PG_CONTAINER" psql -U postgres -d synclead -tAc)
-  if [ -n "$("${psql[@]}" "SELECT to_regclass('app_users')")" ]; then
-    [ "$("${psql[@]}" "SELECT count(*) FROM app_users")" = "0" ] || return 0
+  if [ -n "$("${psql[@]}" "SELECT to_regclass('app_users')")" ] &&
+    [ "$("${psql[@]}" "SELECT count(*) FROM app_users")" != "0" ]; then
+    # Migra o usuário padrão de instalações locais anteriores (admin) para adm.
+    local admin_email
+    admin_email="$("${psql[@]}" "SELECT email FROM app_users WHERE email IN ('adm@local', 'admin@local') OR username = 'adm' ORDER BY CASE email WHEN 'adm@local' THEN 0 WHEN 'admin@local' THEN 1 ELSE 2 END LIMIT 1")"
+    if [ -n "$admin_email" ]; then
+      api_env npx tsx src/manage-users.ts set-username "$admin_email" adm >/dev/null
+      printf %s "$LOCAL_ADMIN_PASSWORD" | api_env npx tsx src/manage-users.ts set-password "$admin_email" --allow-weak >/dev/null
+      return 0
+    fi
   fi
   echo "Criando usuários locais (primeira execução)..."
-  api_env npx tsx src/manage-users.ts add admin@local admin "Admin Local" --user admin >/dev/null
+  api_env npx tsx src/manage-users.ts add adm@local admin "Administrador Local" --user adm >/dev/null
   api_env npx tsx src/manage-users.ts add gestor@local gestor "Gestor Local" --user gestor >/dev/null
-  printf %s "$LOCAL_ADMIN_PASSWORD" | api_env npx tsx src/manage-users.ts set-password admin >/dev/null
+  printf %s "$LOCAL_ADMIN_PASSWORD" | api_env npx tsx src/manage-users.ts set-password adm --allow-weak >/dev/null
   printf %s "$LOCAL_GESTOR_PASSWORD" | api_env npx tsx src/manage-users.ts set-password gestor >/dev/null
 }
 
@@ -98,7 +106,7 @@ case "${1:-dev}" in
     PIDS+=($!)
     cat <<MSG
 
-  Painel: http://localhost:${WEB_PORT}   (admin / ${LOCAL_ADMIN_PASSWORD}  ou  gestor / ${LOCAL_GESTOR_PASSWORD})
+  Painel: http://localhost:${WEB_PORT}   (adm / ${LOCAL_ADMIN_PASSWORD}  ou  gestor / ${LOCAL_GESTOR_PASSWORD})
   API:    http://localhost:${API_PORT}/health
   Banco:  docker exec -it ${PG_CONTAINER} psql -U postgres -d synclead
   Ctrl+C encerra tudo (os dados do banco local ficam guardados).

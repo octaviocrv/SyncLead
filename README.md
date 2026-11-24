@@ -63,8 +63,24 @@ com o selo "Teste" e ficam fora dos indicadores.
 Requer Docker e Node.js 18.18+.
 
 ```bash
+cd plataforma                # instalar o atalho exige estar nesta pasta (onde está local.sh)
 ./local.sh instalar-atalho   # uma vez: cria o alias rodar-projeto no ~/.bashrc
-rodar-projeto                # de qualquer pasta
+```
+
+Depois de instalado, o alias funciona **de qualquer pasta** (o caminho fica fixo
+no `~/.bashrc`). Se aparecer `comando não encontrado`, é porque o terminal atual
+ainda não leu o `~/.bashrc` com o alias novo — abra um terminal novo ou rode
+`source ~/.bashrc` no terminal atual.
+
+```bash
+rodar-projeto                 # de qualquer pasta, depois de instalado o atalho
+```
+
+Sem o atalho instalado, rode direto de dentro de `plataforma/`:
+
+```bash
+cd plataforma
+./local.sh
 ```
 
 | Comando | O que faz |
@@ -74,7 +90,7 @@ rodar-projeto                # de qualquer pasta
 | `rodar-projeto test` | Fluxo ponta a ponta com Syonet simulado, em banco temporário |
 | `rodar-projeto reset-db` | Apaga o banco local |
 
-- Usuários locais, criados na primeira execução: `admin` / `admin-local-123` e
+- Usuários locais, criados na primeira execução: `adm` / `adm` e
   `gestor` / `gestor-local-123`. Existem só no banco local.
 - Instala as dependências se faltarem. A API recarrega ao salvar um arquivo.
   O Syonet fica desligado e não há token da Meta (os leads ficam em
