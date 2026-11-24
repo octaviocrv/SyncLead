@@ -111,3 +111,20 @@ test('network error is ambiguous', async () => {
   await mock.close();
   await assert.rejects(sendToSyonet(requestBody, configFor(url)), (error: { outcome: string }) => error.outcome === 'ambiguous');
 });
+
+test('403 (event type without Web Service permission) is blocked, not retried', async () => {
+  const { result, mock } = await outcomeFor('forbidden');
+  const error = result as { outcome: string; stage: string; message: string };
+  assert.equal(error.outcome, 'blocked');
+  assert.equal(error.stage, 'syonet_permission');
+  assert.match(error.message, /permission to execute Web Service/);
+  assert.equal(mock.requests.length, 1);
+});
+
+test('500 documented customer error is ambiguous, keeps the Syonet message and is never retried', async () => {
+  const { result, mock } = await outcomeFor('customer-error');
+  const error = result as { outcome: string; message: string };
+  assert.equal(error.outcome, 'ambiguous');
+  assert.match(error.message, /Error to process customer/);
+  assert.equal(mock.requests.length, 1);
+});

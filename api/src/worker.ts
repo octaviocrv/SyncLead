@@ -119,16 +119,9 @@ export async function sendToSyonet(
     );
   }
 
-  if (response.status === 429 || response.status >= 500) onResponse?.(response.status, null);
   if (response.status === 429) {
+    onResponse?.(response.status, null);
     throw new ProcessingError('Syonet rate-limited the request; it can be retried.', 'retry');
-  }
-  if (response.status >= 500) {
-    throw new ProcessingError(
-      `Syonet returned HTTP ${response.status}; the event may have been created, so manual review is required.`,
-      'ambiguous',
-      'syonet',
-    );
   }
 
   let responseText: string;
@@ -148,6 +141,21 @@ export async function sendToSyonet(
       'Syonet authentication failed (HTTP 401): the credentials or authentication mode are invalid. Fix SYONET_AUTH_MODE and the credentials before reprocessing.',
       'blocked',
       'syonet_auth',
+    );
+  }
+  if (response.status >= 500) {
+    // Documentado: 500 = "Error to process customer" ou "Error to create event". O cliente pode ter sido criado; sem reenvio automático.
+    throw new ProcessingError(
+      `Syonet returned HTTP ${response.status}${describeSyonetMessage(responseText)}; manual review is required before retry to avoid a duplicate.`,
+      'ambiguous',
+      'syonet',
+    );
+  }
+  if (response.status === 403) {
+    throw new ProcessingError(
+      `Syonet denied the request (HTTP 403): the event group/type is not allowed to run via Web Service${describeSyonetMessage(responseText)}. Enable it in the CRM before reprocessing.`,
+      'blocked',
+      'syonet_permission',
     );
   }
   if (response.status === 412) {

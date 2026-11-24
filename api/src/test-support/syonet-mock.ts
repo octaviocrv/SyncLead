@@ -7,6 +7,8 @@ export type SyonetMockScenario =
   | 'precondition-failed'
   | 'rate-limited'
   | 'server-error'
+  | 'forbidden'
+  | 'customer-error'
   | 'timeout'
   | 'malformed'
   | 'not-confirmed'
@@ -67,6 +69,10 @@ export async function startSyonetMock(): Promise<SyonetMock> {
           return json(429, { ok: 0, msg: 'Too many requests' });
         case 'server-error':
           return json(503, { ok: 0, msg: 'Unavailable' });
+        case 'forbidden':
+          return json(403, { err: 1, msg: "Event type don't have permission to execute Web Service" });
+        case 'customer-error':
+          return json(500, { err: 1, msg: 'Error to process customer' });
         case 'timeout':
           return; // never answers
         case 'malformed':

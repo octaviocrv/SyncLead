@@ -170,7 +170,7 @@ export function buildSyonetRequest(
       eventType: options.eventType,
       source: options.source,
       media: lead.media,
-      comment: `Lead Meta Lead Ads. Lead ID: ${leadgenId}. Loja escolhida: ${store.answer}.`,
+      comment: `Leads Tráfego Pago. Lead ID: ${leadgenId}. Loja escolhida: ${store.answer}.`,
       leadInfo: {
         'Origem Meta': {
           leadgen_id: leadgenId,
