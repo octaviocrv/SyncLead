@@ -41,7 +41,8 @@ services:
       HOST: 0.0.0.0
       PORT: "3000"
       DATABASE_URL: postgres://synclead:${POSTGRES_PASSWORD}@postgres:5432/synclead
-      SYONET_SEND_ENABLED: "false"
+      # Envio ao Syonet vem do .env (SYONET_SEND_ENABLED); sem a variável, fica desligado.
+      SYONET_SEND_ENABLED: "${SYONET_SEND_ENABLED:-false}"
     networks:
       - cacl_leads_net
     logging: *logging
