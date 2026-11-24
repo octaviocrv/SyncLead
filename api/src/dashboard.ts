@@ -43,6 +43,13 @@ export interface DashboardLead {
   adName: string | null;
   personalDataCapturedAt: string | null;
   personalDataPurgeAfter: string | null;
+  // Revisão manual: em hold (ou recuperado) só sai após autorização de um admin.
+  sendHold: boolean;
+  sendAuthorizedAt: string | null;
+  // Última conferência manual do cliente no Syonet (null = não identificado).
+  customerCheck: { result: 'new' | 'existing' | 'unknown'; at: string; by: string } | null;
+  // Leads anteriores do mesmo telefone/e-mail no nosso banco (dentro da retenção). Não indica cliente no Syonet.
+  recurrentCount: number;
   history: DashboardAttempt[];
 }
 
@@ -60,8 +67,32 @@ const isTestSql = `CASE WHEN l.source = 'reconciliation'
                       AND (l.meta_platform IS NULL OR COALESCE(l.meta_is_organic, FALSE))
                  ELSE l.ad_id IS NULL END`;
 
+// Chaves de contato só a partir do field_data já guardado (telefone: últimos 11 dígitos; e-mail em minúsculas).
+// Só enxerga leads cujos dados pessoais ainda estão retidos; nada novo é gravado.
+const contactKeysSql = `contact_keys AS (
+    SELECT p.leadgen_id, l.received_at,
+      (SELECT right(regexp_replace(f->'values'->>0, '\\D', '', 'g'), 11)
+         FROM jsonb_array_elements(p.field_data) f
+         WHERE lower(f->>'name') IN ('phone_number', 'phone', 'telefone', 'numero_de_telefone', 'mobile_phone') LIMIT 1) AS phone_key,
+      (SELECT lower(btrim(f->'values'->>0))
+         FROM jsonb_array_elements(p.field_data) f
+         WHERE lower(f->>'name') IN ('email', 'e_mail') LIMIT 1) AS email_key
+    FROM lead_personal_data p JOIN leads l ON l.leadgen_id = p.leadgen_id
+  ), earlier_matches AS (
+    SELECT a.leadgen_id, b.leadgen_id AS other_id
+      FROM contact_keys a JOIN contact_keys b ON b.phone_key = a.phone_key AND b.received_at < a.received_at
+      WHERE length(a.phone_key) >= 10
+    UNION
+    SELECT a.leadgen_id, b.leadgen_id
+      FROM contact_keys a JOIN contact_keys b ON b.email_key = a.email_key AND b.received_at < a.received_at
+      WHERE a.email_key LIKE '%@%'
+  ), recurrence AS (
+    SELECT leadgen_id, COUNT(*)::int AS n FROM earlier_matches GROUP BY leadgen_id
+  )`;
+
 function leadQuery(policy: RetentionPolicy, where: string): string {
-  return `SELECT l.leadgen_id AS "leadgenId",
+  return `WITH ${contactKeysSql}
+     SELECT l.leadgen_id AS "leadgenId",
             l.page_id AS "pageId",
             l.form_id AS "formId",
             l.ad_id AS "adId",
@@ -84,6 +115,12 @@ function leadQuery(policy: RetentionPolicy, where: string): string {
             l.adset_name AS "adsetName",
             l.ad_name AS "adName",
             p.field_data AS "fieldData",
+            l.send_hold AS "sendHold",
+            l.send_authorized_at AS "sendAuthorizedAt",
+            (SELECT json_build_object('result', r.customer_result, 'at', r.created_at, 'by', r.user_name)
+               FROM lead_reviews r WHERE r.leadgen_id = l.leadgen_id AND r.action = 'customer_check'
+               ORDER BY r.id DESC LIMIT 1) AS "customerCheck",
+            COALESCE(rc.n, 0) AS "recurrentCount",
             p.captured_at AS "personalDataCapturedAt",
             CASE WHEN p.leadgen_id IS NULL THEN NULL ELSE ${purgeAfterSql(policy)} END AS "personalDataPurgeAfter",
             COALESCE(
@@ -97,6 +134,7 @@ function leadQuery(policy: RetentionPolicy, where: string): string {
             ) AS history
      FROM leads l
      LEFT JOIN lead_personal_data p ON p.leadgen_id = l.leadgen_id
+     LEFT JOIN recurrence rc ON rc.leadgen_id = l.leadgen_id
      ${where}`;
 }
 
@@ -146,8 +184,42 @@ export async function getDashboardLeadDetail(
     );
   }
 
+  const [exchange, reviews, earlier] = await Promise.all([
+    pool.query<{ response: { httpStatus: number | null; body: unknown } | null; at: string | null }>(
+      `SELECT syonet_response AS response, syonet_exchanged_at AS at FROM lead_personal_data WHERE leadgen_id = $1`,
+      [leadgenId],
+    ),
+    pool.query(
+      `SELECT action, user_name AS "by", event_id AS "eventId", customer_result AS "customerResult", note, created_at AS "createdAt"
+       FROM lead_reviews WHERE leadgen_id = $1 ORDER BY id DESC LIMIT 30`,
+      [leadgenId],
+    ),
+    isAdmin && lead.recurrentCount > 0
+      ? pool.query(
+          `WITH ${contactKeysSql}
+           SELECT l.leadgen_id AS "leadgenId", l.received_at AS "receivedAt", l.status, l.selected_store_answer AS "storeAnswer",
+                  l.syonet_event_id AS "eventId"
+           FROM leads l WHERE l.leadgen_id IN (SELECT other_id FROM earlier_matches WHERE leadgen_id = $1)
+           ORDER BY l.received_at DESC LIMIT 10`,
+          [leadgenId],
+        )
+      : Promise.resolve({ rows: [] }),
+  ]);
+  const syonetResponse = exchange.rows[0]?.response ?? null;
+  const responseBody = syonetResponse?.body as { msg?: unknown } | string | null | undefined;
+
   return {
     lead: { ...lead, contact: contactFor(access.user.role, fieldData) },
+    // Resultado do envio: admin vê a resposta completa; gestor só o status HTTP e o horário.
+    syonetExchange: syonetResponse
+      ? {
+          at: exchange.rows[0]?.at ?? null,
+          httpStatus: syonetResponse.httpStatus,
+          response: isAdmin ? responseBody ?? null : undefined,
+        }
+      : null,
+    reviews: reviews.rows,
+    earlierLeads: earlier.rows,
     // Gestor: só sabe que os dados existem; field_data, normalização e preview ficam com o admin.
     personalDataRestricted: Boolean(fieldData) && !isAdmin,
     personalData: fieldData && isAdmin
