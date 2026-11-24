@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Pool } from 'pg';
-import { initializeDatabase } from './database.js';
+import { claimLead, initializeDatabase } from './database.js';
 import { evaluateAlerts, getHealthSummary, runMonitoringCycle, type MonitoringConfiguration } from './monitoring.js';
 import { syonetConfigurationFor, type SyonetSendConfiguration } from './worker.js';
 
@@ -85,20 +85,28 @@ test('reconciliation indexes Meta leads without PII, recovers only post-webhook 
     assert.equal((await evaluateAlerts(db, true, config.notify)).webhook_missed, 'updated');
     assert.equal(notifications.filter((n) => n.includes('Webhook perdeu')).length, 1, 'no repeated notification');
 
-    // Recuperado já processado nunca é reivindicado para envio ao Syonet.
+    // Recuperado entra sem hold e é reivindicado como um lead de webhook (mesma regra de elegibilidade).
+    const held = await db.query(`SELECT 1 FROM leads WHERE leadgen_id IN ($1, $2) AND send_hold`, [ids.missed, ids.page2]);
+    assert.equal(held.rowCount, 0, 'reconciliation leads are not held');
     await db.query(
       `UPDATE leads SET status = 'waiting_config', meta_processed_at = NOW() WHERE leadgen_id IN ($1, $2)`,
       [ids.missed, ids.page2],
     );
-    const claimable = await db.query(
-      `SELECT 1 FROM leads WHERE leadgen_id IN ($1, $2) AND status = 'waiting_config'
-         AND meta_processed_at IS NOT NULL AND source = 'webhook'`,
-      [ids.missed, ids.page2],
-    );
-    assert.equal(claimable.rowCount, 0, 'Syonet claim branch excludes reconciliation leads');
+    await db.query(`UPDATE leads SET status = 'sent' WHERE leadgen_id NOT IN ($1, $2)`, [ids.missed, ids.page2]);
+    const claimed = await claimLead(db, true, true);
+    assert.ok(claimed && [ids.missed, ids.page2].includes(claimed.leadgen_id), 'reconciliation lead is claimable for Syonet');
+    assert.equal(claimed.source, 'reconciliation');
+    await db.query(`UPDATE leads SET status = 'waiting_config' WHERE leadgen_id = $1`, [claimed.leadgen_id]);
+    // Só o send_hold explícito retém.
     const syonet = { apiUrl: 'https://example.test' } as SyonetSendConfiguration;
-    assert.equal(syonetConfigurationFor(ids.missed, syonet, 'reconciliation'), undefined);
-    assert.equal(syonetConfigurationFor(ids.present, syonet, 'webhook'), syonet);
+    assert.equal(syonetConfigurationFor(ids.missed, syonet, { sendHold: false }), syonet);
+    assert.equal(syonetConfigurationFor(ids.missed, syonet, { sendHold: true }), undefined);
+    assert.equal(syonetConfigurationFor(ids.missed, syonet, { sendHold: true, authorized: true }), syonet);
+    await db.query(`UPDATE leads SET send_hold = TRUE WHERE leadgen_id = $1`, [ids.page2]);
+    assert.equal(
+      (await db.query(`SELECT 1 FROM leads WHERE leadgen_id = $1 AND status = 'waiting_config' AND meta_processed_at IS NOT NULL AND NOT send_hold`, [ids.page2])).rowCount,
+      0,
+    );
 
     const health = await getHealthSummary(db, { recoverSince: config.recoverSince, missingAfterMinutes: 15, syonetEnabled: false, metaConfigured: true });
     const since = health.delivery.find((d) => d.label === 'desde_webhook');

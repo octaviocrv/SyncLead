@@ -152,7 +152,7 @@ async function apply(
       return fail(409, 'O lead precisa estar processado e aguardando envio para ser autorizado.');
     }
     if (lead.send_authorized_at) return fail(409, 'O envio deste lead já foi autorizado.');
-    if (!lead.send_hold && lead.source === 'webhook') return fail(409, 'Este lead não está em revisão: ele sai automaticamente.');
+    if (!lead.send_hold) return fail(409, 'Este lead não está retido: ele sai automaticamente.');
     await client.query(
       `UPDATE leads SET send_authorized_at = NOW(), send_authorized_by = $2, updated_at = NOW() WHERE leadgen_id = $1`,
       [id, user.id],

@@ -141,7 +141,7 @@ export async function recoverMissingLeads(pool: Pool, config: MonitoringConfigur
     await client.query('BEGIN');
     const result = await client.query<{ leadgen_id: string }>(
       `INSERT INTO leads (leadgen_id, form_id, page_id, ad_id, created_time, status, source, send_hold)
-       SELECT m.leadgen_id, m.form_id, $1, m.ad_id, EXTRACT(EPOCH FROM m.meta_created_at)::bigint, 'received', 'reconciliation', TRUE
+       SELECT m.leadgen_id, m.form_id, $1, m.ad_id, EXTRACT(EPOCH FROM m.meta_created_at)::bigint, 'received', 'reconciliation', FALSE
        FROM meta_leads m
        WHERE m.meta_created_at >= $2
          AND m.meta_created_at < NOW() - make_interval(mins => $3)
@@ -153,7 +153,7 @@ export async function recoverMissingLeads(pool: Pool, config: MonitoringConfigur
     for (const row of result.rows) {
       await client.query(
         `INSERT INTO processing_attempts (leadgen_id, stage, status, message) VALUES ($1, 'reconciliation', 'success', $2)`,
-        [row.leadgen_id, 'Lead recovered from the Meta form list (webhook did not deliver it); held for manual review, not sent automatically.'],
+        [row.leadgen_id, 'Lead recovered from the Meta form list (webhook did not deliver it); processed automatically like a webhook lead.'],
       );
     }
     await client.query('COMMIT');
@@ -253,7 +253,7 @@ export async function evaluateAlerts(pool: Pool, metaConfigured: boolean, notify
     webhook_missed: await syncAlert(pool, 'webhook_missed', missed.length ? {
       kind: 'webhook_missed', severity: 'critical', count: missed.length,
       title: 'Webhook perdeu leads da Meta',
-      message: `${missed.length} lead(s) nas últimas 24 h só chegaram pela reconciliação (não vão ao Syonet): ${listIds(missed)}. Verifique a assinatura do webhook no app da Meta.`,
+      message: `${missed.length} lead(s) nas últimas 24 h só chegaram pela reconciliação (o webhook não entregou; seguem o fluxo normal): ${listIds(missed)}. Verifique a assinatura do webhook no app da Meta.`,
     } : undefined, notify),
     processing_errors: await syncAlert(pool, 'processing_errors', errors.length ? {
       kind: 'processing_errors', severity: 'critical', count: errors.length,
