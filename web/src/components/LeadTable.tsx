@@ -27,9 +27,13 @@ export default function LeadTable({ rows, onSelect, emptyText = 'Nenhum lead enc
               <div className="cell-title">
                 {lead.name ?? lead.id}
                 {lead.isTest && <span className="badge badge-test" title="Sem anúncio: ferramenta de teste da Meta ou orgânico. Fora das métricas.">Teste</span>}
-                {lead.recovered && <span className="badge badge-recovered" title="O webhook não entregou; recuperado pela conferência com a Meta. Não é enviado ao Syonet.">Recuperado</span>}
+                {lead.recovered && <span className="badge badge-recovered" title="O webhook não entregou; recuperado pela conferência com a Meta. Só é enviado ao Syonet após autorização de um administrador.">Recuperado</span>}
+                {lead.recurrentCount > 0 && <span className="badge badge-recurrent" title="Este telefone ou e-mail já enviou lead(s) anterior(es) pelo SyncLead. Não indica cliente no Syonet.">Recorrente ({lead.recurrentCount})</span>}
               </div>
-              <div className="cell-sub">{lead.name ? `${lead.id} · ` : ''}{lead.origin}</div>
+              <div className="cell-sub">
+                {lead.name ? `${lead.id} · ` : ''}{lead.origin}
+                {lead.customerCheck ? ` · Cliente: ${lead.customerCheck.result === 'new' ? 'novo' : lead.customerCheck.result === 'existing' ? 'existente' : 'não identificado'} (conferido)` : ''}
+              </div>
             </td>
             <td>
               <div>{lead.phoneMasked ?? '—'}</div>

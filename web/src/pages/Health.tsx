@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Activity, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { fetchHealth, formatDateTime, type HealthAlert, type HealthData } from '../api';
 import { PageHeader, Section } from '../components/ui';
@@ -13,7 +14,7 @@ const queueLabel: Record<string, string> = {
   sent: 'Enviado ao Syonet',
   failed: 'Falhou',
   blocked: 'Bloqueado',
-  ambiguous: 'Ambíguo',
+  ambiguous: 'Resultado incerto',
 };
 
 type Tone = 'ok' | 'warn' | 'bad' | 'idle';
@@ -48,6 +49,7 @@ function AlertRow({ alert }: { alert: HealthAlert }) {
       <div>
         <strong>{alert.title}</strong>
         {alert.message && !resolved ? <p>{alert.message}</p> : null}
+        {!resolved && ['ambiguous_results', 'processing_errors', 'webhook_missed'].includes(alert.kind) ? <p><Link to="/pendencias">Abrir Pendências</Link></p> : null}
       </div>
       <small>
         {resolved ? `Resolvido ${formatDateTime(alert.resolvedAt ?? null)}` : `Aberto desde ${formatDateTime(alert.openedAt)}`}
