@@ -160,4 +160,25 @@ CREATE TABLE IF NOT EXISTS system_state (
   value JSONB NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Revisão manual: lead em hold (ou recuperado) só é enviado depois de autorização explícita de um admin.
+ALTER TABLE leads
+  ADD COLUMN IF NOT EXISTS send_hold BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS send_authorized_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS send_authorized_by BIGINT REFERENCES app_users(id) ON DELETE SET NULL;
+
+-- Registro de toda conferência manual feita no painel (somente admin). Sem PII além da observação curta.
+CREATE TABLE IF NOT EXISTS lead_reviews (
+  id BIGSERIAL PRIMARY KEY,
+  leadgen_id TEXT NOT NULL REFERENCES leads(leadgen_id) ON DELETE CASCADE,
+  user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  user_name TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('event_confirmed', 'resend_authorized', 'unverified', 'send_authorized', 'customer_check')),
+  event_id TEXT,
+  customer_result TEXT CHECK (customer_result IN ('new', 'existing', 'unknown')),
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS lead_reviews_lead_idx ON lead_reviews (leadgen_id, created_at);
 `;

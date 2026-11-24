@@ -3,6 +3,7 @@ import { readSessionCookie, sessionCookie, type LoginResult, type SessionUser } 
 import { parseStatsRange, type DashboardLeadSummary } from './dashboard.js';
 import { verifyMetaSignature } from './domain.js';
 import type { MetaWebhookPayload } from './types.js';
+import type { ReviewAction, ReviewResult } from './reviews.js';
 
 const maxBodyBytes = 1_000_000;
 
@@ -29,6 +30,7 @@ export interface ApiServerDependencies {
   getLeadDetail?: (leadgenId: string, access: { remoteAddr: string | null; user: SessionUser }) => Promise<object | undefined>;
   getHealth?: () => Promise<object>;
   getStats?: (range: { from: string; to: string }) => Promise<object>;
+  reviewLead?: (leadgenId: string, action: ReviewAction, body: Record<string, unknown>, user: SessionUser) => Promise<ReviewResult>;
 }
 
 function clientAddress(request: IncomingMessage): string | null {
@@ -295,6 +297,45 @@ async function handlePanelRequest(
       return;
     }
     sendJson(reply, 200, { ...(await dependencies.getStats(range)) });
+    return;
+  }
+
+  // Ações de revisão: únicas rotas do painel que alteram dados. Somente admin; exigem POST application/json
+  // (bloqueia formulário cross-site), cookie SameSite=Strict e o cabeçalho x-synclead-csrf (um site de terceiros
+  // não consegue enviá-lo sem pré-autorização CORS, que a API não concede).
+  const reviewMatch = /^\/api\/dashboard\/leads\/(\d{1,32})\/(resolve|authorize-send|customer-check)$/.exec(url.pathname);
+  if (reviewMatch && dependencies.reviewLead) {
+    if (request.method !== 'POST') {
+      reply.writeHead(405, { allow: 'POST' });
+      reply.end();
+      return;
+    }
+    if (user.role !== 'admin') {
+      request.resume();
+      sendJson(reply, 403, { error: 'Apenas administradores podem executar esta ação.' });
+      return;
+    }
+    if (!isJson(request) || request.headers['x-synclead-csrf'] !== '1') {
+      request.resume();
+      sendJson(reply, !isJson(request) ? 415 : 403, { error: 'Requisição não autorizada.' });
+      return;
+    }
+    const raw = await readBody(request);
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = raw && raw.length <= 4096 ? JSON.parse(raw.toString('utf8')) : undefined;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+      else throw new Error('invalid');
+    } catch {
+      sendJson(reply, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const result = await dependencies.reviewLead(reviewMatch[1], reviewMatch[2] as ReviewAction, body, user);
+    if (!result.ok) {
+      sendJson(reply, result.status, { error: result.error });
+      return;
+    }
+    sendJson(reply, 200, { ok: true, message: result.message });
     return;
   }
 

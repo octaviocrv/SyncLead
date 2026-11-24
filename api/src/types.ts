@@ -58,6 +58,8 @@ export interface PersistedLead {
   created_time: number | null;
   status: LeadStatus;
   attempts: number;
+  send_hold?: boolean;
+  send_authorized?: boolean;
   selected_store_answer: string | null;
   source?: 'webhook' | 'reconciliation';
 }

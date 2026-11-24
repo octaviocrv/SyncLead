@@ -92,7 +92,8 @@ export async function claimLead(
        WHERE (
          (status IN ('received', 'retry') AND available_at <= NOW())
          OR ($1 AND status = 'waiting_config' AND meta_processed_at IS NULL)
-         OR ($2 AND status = 'waiting_config' AND meta_processed_at IS NOT NULL AND source = 'webhook'
+         OR ($2 AND status = 'waiting_config' AND meta_processed_at IS NOT NULL
+             AND (send_authorized_at IS NOT NULL OR (source = 'webhook' AND NOT send_hold))
              AND (cardinality($3::text[]) = 0 OR leadgen_id = ANY($3::text[])))
        )
        ORDER BY available_at, received_at
@@ -108,7 +109,8 @@ export async function claimLead(
      WHERE lead.leadgen_id = next_lead.leadgen_id
      RETURNING lead.leadgen_id, lead.form_id, lead.page_id, lead.ad_id,
                lead.adgroup_id, lead.created_time, lead.status, lead.attempts,
-               lead.selected_store_answer, lead.source`,
+               lead.selected_store_answer, lead.source, lead.send_hold,
+               (lead.send_authorized_at IS NOT NULL) AS send_authorized`,
     [metaProcessingConfigured, syonetSendingConfigured, onlyLeadgenIds],
   );
   return result.rows[0];

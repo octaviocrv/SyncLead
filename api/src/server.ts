@@ -3,6 +3,7 @@ import { createApiServer } from './app.js';
 import { authenticate, login, logout, purgeAuthData } from './auth.js';
 import { createPool, initializeDatabase, persistWebhook, recoverStaleLeads } from './database.js';
 import { getDashboardLeadDetail, getDashboardStats, listDashboardLeads } from './dashboard.js';
+import { reviewLead } from './reviews.js';
 import { purgeExpiredData, type RetentionPolicy } from './personal-data.js';
 import { getHealthSummary, purgeMonitoringData, runMonitoringCycle, telegramNotifier, type MonitoringConfiguration } from './monitoring.js';
 import { runWorker } from './worker.js';
@@ -70,6 +71,7 @@ const server = createApiServer({
     phoneFormat: config.syonetPhoneFormat,
   }, retentionPolicy),
   getStats: (range) => getDashboardStats(pool, range),
+  reviewLead: (leadgenId, action, body, user) => reviewLead(pool, leadgenId, action, body, user),
   getHealth: () => getHealthSummary(pool, {
     recoverSince: monitoringConfig.recoverSince,
     missingAfterMinutes: monitoringConfig.missingAfterMinutes,

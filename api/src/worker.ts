@@ -30,9 +30,11 @@ export function syonetConfigurationFor(
   leadgenId: string,
   syonet: SyonetSendConfiguration | undefined,
   source: PersistedLead['source'] = 'webhook',
+  access: { sendHold?: boolean; authorized?: boolean } = {},
 ): SyonetSendConfiguration | undefined {
-  // Leads recuperados pela reconciliação nunca vão ao Syonet.
-  if (!syonet || source !== 'webhook') return undefined;
+  // Lead recuperado pela reconciliação ou em hold só é enviado após autorização explícita de um admin.
+  if (!syonet) return undefined;
+  if (!access.authorized && (source !== 'webhook' || access.sendHold)) return undefined;
   if (syonet.onlyLeadgenIds?.length && !syonet.onlyLeadgenIds.includes(leadgenId)) return undefined;
   return syonet;
 }
@@ -234,7 +236,10 @@ async function processLead(
     console.error(`Could not store personal data for lead ${lead.leadgen_id}:`, error instanceof Error ? error.message : 'unknown error');
   }
 
-  const syonet = syonetConfigurationFor(lead.leadgen_id, workerConfig.syonet, lead.source);
+  const syonet = syonetConfigurationFor(lead.leadgen_id, workerConfig.syonet, lead.source, {
+    sendHold: lead.send_hold,
+    authorized: lead.send_authorized,
+  });
   let normalized;
   let mapping;
   let requestBody: SyonetLeadRequest;
