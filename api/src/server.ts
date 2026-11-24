@@ -6,6 +6,7 @@ import { getDashboardLeadDetail, getDashboardStats, listDashboardLeads } from '.
 import { reviewLead } from './reviews.js';
 import { purgeExpiredData, type RetentionPolicy } from './personal-data.js';
 import { getHealthSummary, purgeMonitoringData, runMonitoringCycle, telegramNotifier, type MonitoringConfiguration } from './monitoring.js';
+import { getStorageStatus, syncStorageAlert, type StorageConfiguration } from './storage.js';
 import { runWorker } from './worker.js';
 
 function positiveInteger(name: string, fallback: number): number {
@@ -40,6 +41,15 @@ const monitoringConfig: MonitoringConfiguration = {
   missingAfterMinutes: positiveInteger('ALERT_MISSING_LEAD_MINUTES', 15),
   notify: telegramBotToken && telegramChatId ? telegramNotifier(telegramBotToken, telegramChatId) : undefined,
 };
+const storageConfig: StorageConfiguration = {
+  path: process.env.STORAGE_PATH?.trim() || '/',
+  reportFile: process.env.STORAGE_REPORT_FILE?.trim() || '/host-report/report.json',
+  warnPercent: positiveInteger('STORAGE_WARN_PERCENT', 70),
+  criticalPercent: positiveInteger('STORAGE_CRITICAL_PERCENT', 85),
+};
+if (storageConfig.warnPercent >= storageConfig.criticalPercent || storageConfig.criticalPercent > 100) {
+  throw new Error('STORAGE_WARN_PERCENT must be lower than STORAGE_CRITICAL_PERCENT (max 100).');
+}
 const reconciliationIntervalMs = positiveInteger('RECONCILIATION_INTERVAL_MINUTES', 15) * 60 * 1000;
 
 const pool = createPool(config.databaseUrl);
@@ -72,6 +82,7 @@ const server = createApiServer({
   }, retentionPolicy),
   getStats: (range) => getDashboardStats(pool, range),
   reviewLead: (leadgenId, action, body, user) => reviewLead(pool, leadgenId, action, body, user),
+  getStorage: () => getStorageStatus(pool, storageConfig),
   getHealth: () => getHealthSummary(pool, {
     recoverSince: monitoringConfig.recoverSince,
     missingAfterMinutes: monitoringConfig.missingAfterMinutes,
@@ -109,6 +120,15 @@ async function runMonitoring(): Promise<void> {
   }
 }
 
+async function runStorageCheck(): Promise<void> {
+  try {
+    await syncStorageAlert(pool, await getStorageStatus(pool, storageConfig), monitoringConfig.notify);
+  } catch (error) {
+    console.error('Storage check failed:', error instanceof Error ? error.message : 'unknown error');
+  }
+}
+let storageTimer: NodeJS.Timeout | undefined;
+
 try {
   await initializeDatabase(pool);
   await recoverStaleLeads(pool);
@@ -123,6 +143,9 @@ try {
   void runRetention();
   retentionTimer = setInterval(() => void runRetention(), 60 * 60 * 1000);
   retentionTimer.unref();
+  setTimeout(() => void runStorageCheck(), 45_000).unref();
+  storageTimer = setInterval(() => void runStorageCheck(), 5 * 60 * 1000);
+  storageTimer.unref();
   if (metaProcessingConfigured) {
     setTimeout(() => void runMonitoring(), 30_000).unref();
     monitoringTimer = setInterval(() => void runMonitoring(), reconciliationIntervalMs);
@@ -151,6 +174,7 @@ const shutdown = async () => {
   workerAbort.abort();
   clearInterval(retentionTimer);
   clearInterval(monitoringTimer);
+  clearInterval(storageTimer);
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });

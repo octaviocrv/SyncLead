@@ -29,6 +29,7 @@ export interface ApiServerDependencies {
   listLeads?: (user: SessionUser) => Promise<DashboardLeadSummary[]>;
   getLeadDetail?: (leadgenId: string, access: { remoteAddr: string | null; user: SessionUser }) => Promise<object | undefined>;
   getHealth?: () => Promise<object>;
+  getStorage?: () => Promise<object>;
   getStats?: (range: { from: string; to: string }) => Promise<object>;
   reviewLead?: (leadgenId: string, action: ReviewAction, body: Record<string, unknown>, user: SessionUser) => Promise<ReviewResult>;
 }
@@ -282,6 +283,16 @@ async function handlePanelRequest(
       return;
     }
     sendJson(reply, 200, { ...(await dependencies.getHealth()), generatedAt: new Date().toISOString() });
+    return;
+  }
+
+  if (url.pathname === '/api/dashboard/storage' && dependencies.getStorage) {
+    if (request.method !== 'GET') {
+      reply.writeHead(405, { allow: 'GET' });
+      reply.end();
+      return;
+    }
+    sendJson(reply, 200, { ...(await dependencies.getStorage()) });
     return;
   }
 
