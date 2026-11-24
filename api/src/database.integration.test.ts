@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
 import test from 'node:test';
-import { claimLead, initializeDatabase, persistWebhook } from './database.js';
+import { claimLead, initializeDatabase, persistWebhook, recoverStaleLeads, updateLead } from './database.js';
 import { runWorker } from './worker.js';
 import type { MetaWebhookPayload } from './types.js';
 
@@ -143,6 +143,56 @@ test('PostgreSQL deduplicates Meta events and processes synthetic leads without 
     const metaReadyLead = await claimLead(pool, true, false);
     assert.equal(metaReadyLead?.leadgen_id, 'synthetic-waiting-for-meta-config');
     assert.equal(metaReadyLead?.attempts, 1);
+  } finally {
+    await pool?.end();
+    await adminPool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+    await adminPool.end();
+  }
+});
+
+test('lead lifecycle: lock heartbeat, stale recovery and no overwrite of a changed state', {
+  skip: testDatabaseUrl ? false : 'Set TEST_DATABASE_URL to an isolated PostgreSQL test database.',
+}, async () => {
+  const databaseUrl = testDatabaseUrl;
+  if (!databaseUrl) return;
+  const adminPool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const schemaName = `synclead_it_${process.pid}_${randomBytes(4).toString('hex')}`;
+  let pool: Pool | undefined;
+  try {
+    await adminPool.query(`CREATE SCHEMA "${schemaName}"`);
+    pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schemaName}`, max: 3 });
+    await initializeDatabase(pool);
+    const row = async (id: string) => (await pool!.query<{ status: string; locked_at: Date | null; syonet_event_id: string | null }>(
+      'SELECT status, locked_at, syonet_event_id FROM leads WHERE leadgen_id = $1', [id])).rows[0];
+
+    // 1) updateLead('processing') mantém locked_at; o resultado final libera.
+    await persistWebhook(pool, testPayload('lc-1'), false);
+    assert.equal((await claimLead(pool, true, false))?.leadgen_id, 'lc-1');
+    assert.equal(await updateLead(pool, 'lc-1', 'processing', 'step', { stage: 'meta_fetch' }), true);
+    assert.ok((await row('lc-1')).locked_at, 'locked_at survives intermediate updates');
+
+    // 2) lead realmente parado é encontrado e vai para ambiguous (nunca reenvio automático).
+    await pool.query(`UPDATE leads SET locked_at = NOW() - INTERVAL '10 minutes', updated_at = NOW() - INTERVAL '10 minutes' WHERE leadgen_id = 'lc-1'`);
+    await recoverStaleLeads(pool);
+    assert.equal((await row('lc-1')).status, 'ambiguous');
+
+    // 3) resultado atrasado de falha não sobrescreve; confirmação de envio (evento criado) é preservada.
+    assert.equal(await updateLead(pool, 'lc-1', 'failed', 'late failure'), false);
+    assert.equal((await row('lc-1')).status, 'ambiguous');
+    assert.equal(await updateLead(pool, 'lc-1', 'sent', 'confirmed', { eventId: '999' }), true);
+    assert.deepEqual([(await row('lc-1')).status, (await row('lc-1')).syonet_event_id], ['sent', '999']);
+
+    // 4) lead sent não volta para a fila e não é sobrescrito.
+    assert.equal(await updateLead(pool, 'lc-1', 'retry', 'should not apply'), false);
+    assert.equal(await claimLead(pool, true, true), undefined);
+    assert.equal((await row('lc-1')).status, 'sent');
+
+    // 5) processing legado com locked_at nulo também é recuperado.
+    await persistWebhook(pool, testPayload('lc-2'), false);
+    await claimLead(pool, true, false);
+    await pool.query(`UPDATE leads SET locked_at = NULL, updated_at = NOW() - INTERVAL '10 minutes' WHERE leadgen_id = 'lc-2'`);
+    await recoverStaleLeads(pool);
+    assert.equal((await row('lc-2')).status, 'ambiguous');
   } finally {
     await pool?.end();
     await adminPool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);

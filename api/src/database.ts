@@ -93,7 +93,7 @@ export async function claimLead(
          (status IN ('received', 'retry') AND available_at <= NOW())
          OR ($1 AND status = 'waiting_config' AND meta_processed_at IS NULL)
          OR ($2 AND status = 'waiting_config' AND meta_processed_at IS NOT NULL
-             AND (send_authorized_at IS NOT NULL OR (source = 'webhook' AND NOT send_hold))
+             AND (send_authorized_at IS NOT NULL OR NOT send_hold)
              AND (cardinality($3::text[]) = 0 OR leadgen_id = ANY($3::text[])))
        )
        ORDER BY available_at, received_at
@@ -124,7 +124,7 @@ export async function recoverStaleLeads(pool: Pool): Promise<void> {
          last_error = 'Worker stopped during processing; manual review is required before retry.',
          updated_at = NOW()
      WHERE status = 'processing'
-       AND locked_at < NOW() - INTERVAL '5 minutes'`,
+       AND COALESCE(locked_at, updated_at) < NOW() - INTERVAL '5 minutes'`,
   );
 }
 
@@ -155,11 +155,11 @@ export async function updateLead(
     stage?: string;
     metaProcessed?: boolean;
   } = {},
-): Promise<void> {
+): Promise<boolean> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(
+    const updated = await client.query(
       `UPDATE leads
        SET status = $2,
            last_error = CASE WHEN $2 IN ('sent') THEN NULL ELSE $3 END,
@@ -170,9 +170,10 @@ export async function updateLead(
                                ELSE NOW() + ($7::text || ' seconds')::interval END,
            attempts = CASE WHEN $8 AND $2 = 'waiting_config' THEN 0 ELSE attempts END,
            meta_processed_at = CASE WHEN $8 THEN NOW() ELSE meta_processed_at END,
-           locked_at = NULL,
+           locked_at = CASE WHEN $2 = 'processing' THEN NOW() ELSE NULL END,
            updated_at = NOW()
-       WHERE leadgen_id = $1`,
+       WHERE leadgen_id = $1
+         AND (status = 'processing' OR (status = 'ambiguous' AND $2 = 'sent'))`,
       [
         leadgenId,
         status,
@@ -184,8 +185,22 @@ export async function updateLead(
         details.metaProcessed ?? false,
       ],
     );
+    if (!updated.rowCount) {
+      // O lead deixou de estar em processamento (ex.: recuperação de lead preso). Não sobrescreve o
+      // estado atual; só registra no histórico que este resultado foi descartado.
+      await addAttempt(
+        client,
+        leadgenId,
+        details.stage ?? 'processing',
+        'ignored',
+        `Resultado "${status}" descartado: o lead já não estava em processamento. ${message}`,
+      );
+      await client.query('COMMIT');
+      return false;
+    }
     await addAttempt(client, leadgenId, details.stage ?? 'processing', status, message);
     await client.query('COMMIT');
+    return true;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
