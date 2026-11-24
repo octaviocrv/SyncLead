@@ -1,0 +1,28 @@
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		-Server
+	}
+
+	# API: só /health, o webhook Meta, o login e a leitura do painel (sessão exigida na API).
+	@api path /health /api/webhooks/meta /api/auth/* /api/dashboard/*
+	handle @api {
+		reverse_proxy api:3000
+	}
+	handle /api/* {
+		respond "Not found" 404
+	}
+
+	# Painel estático (React). Sem sessão válida, ele só mostra a tela de login.
+	handle {
+		root * /srv/panel
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,0 +1,80 @@
+name: cacl-leads
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cacl_leads_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synclead
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: synclead
+    volumes:
+      - cacl_leads_pgdata:/var/lib/postgresql/data
+    networks:
+      - cacl_leads_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synclead -d synclead"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging: *logging
+
+  api:
+    build:
+      context: ./api
+    image: cacl-leads-api:latest
+    container_name: cacl_leads_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgres://synclead:${POSTGRES_PASSWORD}@postgres:5432/synclead
+      SYONET_SEND_ENABLED: "false"
+    networks:
+      - cacl_leads_net
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: cacl_leads_caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Defina API_DOMAIN no .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web-dist:/srv/panel:ro
+      - cacl_leads_caddy_data:/data
+      - cacl_leads_caddy_config:/config
+    networks:
+      - cacl_leads_net
+    logging: *logging
+
+networks:
+  cacl_leads_net:
+    name: cacl_leads_net
+
+volumes:
+  cacl_leads_pgdata:
+    name: cacl_leads_pgdata
+  cacl_leads_caddy_data:
+    name: cacl_leads_caddy_data
+  cacl_leads_caddy_config:
+    name: cacl_leads_caddy_config
