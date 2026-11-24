@@ -59,7 +59,7 @@ try {
       process.exitCode = 3;
       continue;
     }
-    const preview = data.syonetPreview as { event: { media: string } } | null;
+    const preview = data.syonetPreview as { event: { media?: string } } | null;
     if (preview && data.normalized?.organicWithoutPlatform && config.syonetHomologationMedia) {
       preview.event.media = config.syonetHomologationMedia;
     }

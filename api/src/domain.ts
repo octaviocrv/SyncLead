@@ -68,10 +68,11 @@ export function extractNormalizedLead(lead: MetaLeadResponse): NormalizedLead {
         ? 'INSTAGRAM'
         : undefined;
 
-  // Leads de teste da Meta são orgânicos e não trazem platform; leads de anúncio continuam exigindo.
-  const organicWithoutPlatform = !media && lead.is_organic === true && !lead.ad_id;
-  if (!name || !email || !phone || store === undefined || (!media && !organicWithoutPlatform)) {
-    throw new Error('Lead sem nome, e-mail, telefone, loja ou plataforma reconhecida.');
+  // platform/ad_id ausentes não bloqueiam: o lead segue sem mídia e o painel registra que a origem
+  // detalhada não foi informada pela Meta.
+  const organicWithoutPlatform = !media;
+  if (!name || !email || !phone || store === undefined) {
+    throw new Error('Lead sem nome, e-mail, telefone ou loja válidos.');
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('O e-mail do lead não está em um formato válido.');
@@ -125,7 +126,7 @@ export interface SyonetLeadRequest {
     eventGroup: string;
     eventType: string;
     source: string;
-    media: string;
+    media?: string;
     comment: string;
     leadInfo: Record<string, Record<string, string>>;
   };
@@ -151,9 +152,6 @@ export function buildSyonetRequest(
   if (!store.active) {
     throw new Error(`A loja "${store.answer}" está inativa no mapeamento do Syonet.`);
   }
-  if (!lead.media) {
-    throw new Error('Lead orgânico sem plataforma não pode ser enviado ao Syonet.');
-  }
   const phone = options.phoneFormat === 'e164'
     ? { e164Number: lead.phone }
     : toSyonetPhone(lead.phone);
@@ -169,7 +167,7 @@ export function buildSyonetRequest(
       eventGroup: options.eventGroup,
       eventType: options.eventType,
       source: options.source,
-      media: lead.media,
+      ...(lead.media ? { media: lead.media } : {}),
       comment: `Leads Tráfego Pago. Lead ID: ${leadgenId}. Loja escolhida: ${store.answer}.`,
       leadInfo: {
         'Origem Meta': {

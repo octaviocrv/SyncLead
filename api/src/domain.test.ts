@@ -83,8 +83,8 @@ test('combines first and last name when Meta does not return full_name', () => {
   assert.equal(lead.media, 'INSTAGRAM');
 });
 
-test('rejects leads without the Facebook/Instagram source instead of guessing media', () => {
-  assert.throws(() => extractNormalizedLead({
+test('lead without platform or ad_id is not blocked: it goes on without media', () => {
+  const base = {
     id: 'lead-3',
     field_data: [
       { name: 'full_name', values: ['Pessoa Teste'] },
@@ -92,27 +92,27 @@ test('rejects leads without the Facebook/Instagram source instead of guessing me
       { name: 'phone_number', values: ['(35) 99999-9999'] },
       { name: 'store_choice', values: ['VW Lavras'] },
     ],
-  }), /plataforma reconhecida/);
+  };
+  for (const extra of [{}, { is_organic: true }, { is_organic: false }, { is_organic: true, ad_id: '123' }]) {
+    const lead = extractNormalizedLead({ ...base, ...extra });
+    assert.equal(lead.media, undefined);
+    assert.equal(lead.organicWithoutPlatform, true);
+    const request = buildSyonetRequest(lead, 'lead-3', {
+      formId: 'form-test', daysToUpdateOpenEvent: 30, eventGroup: 'G', eventType: 'T', source: 'S',
+    });
+    assert.equal('media' in request.event, false, 'media is omitted, never invented');
+  }
+  const withPlatform = extractNormalizedLead({ ...base, platform: 'ig' });
+  assert.equal(withPlatform.media, 'INSTAGRAM');
+  assert.equal(withPlatform.organicWithoutPlatform, false);
 });
 
-test('accepts a lead without platform only when Meta marks it as organic', () => {
-  const base = {
-    id: 'lead-4',
-    field_data: [
-      { name: 'full_name', values: ['Pessoa Teste'] },
-      { name: 'email', values: ['teste@example.com'] },
-      { name: 'phone_number', values: ['(35) 99999-9999'] },
-      { name: 'store_choice', values: ['VW Lavras'] },
-    ],
-  };
-  const organic = extractNormalizedLead({ ...base, is_organic: true });
-  assert.equal(organic.organicWithoutPlatform, true);
-  assert.equal(organic.media, undefined);
-  assert.throws(() => buildSyonetRequest(organic, 'lead-4', {
-    formId: 'form-test', daysToUpdateOpenEvent: 30, eventGroup: 'G', eventType: 'T', source: 'S',
-  }), /sem plataforma/);
-  assert.throws(() => extractNormalizedLead({ ...base, is_organic: false }), /plataforma reconhecida/);
-  assert.throws(() => extractNormalizedLead({ ...base, is_organic: true, ad_id: '123' }), /plataforma reconhecida/);
+test('still rejects a lead without name, e-mail, phone or store', () => {
+  assert.throws(() => extractNormalizedLead({
+    id: 'lead-5',
+    platform: 'fb',
+    field_data: [{ name: 'full_name', values: ['Pessoa Teste'] }],
+  }), /nome, e-mail, telefone ou loja/);
 });
 
 test('verifies Meta SHA-256 signatures against the original body', () => {

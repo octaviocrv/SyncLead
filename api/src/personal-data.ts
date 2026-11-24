@@ -151,20 +151,13 @@ export function diagnoseLead(
   const syonetBlockers: string[] = [];
   if (!mapping) syonetBlockers.push('A resposta de loja não está mapeada para uma empresa Syonet.');
   else if (!mapping.active) syonetBlockers.push(`A loja "${mapping.answer}" está inativa no mapeamento do Syonet.`);
-  if (!normalized.media) {
-    syonetBlockers.push(
-      normalized.organicWithoutPlatform
-        ? 'Lead orgânico/teste sem plataforma: nunca é enviado ao Syonet.'
-        : 'Plataforma (Facebook/Instagram) não identificada.',
-    );
-  }
 
   let syonetPreview: unknown = null;
   if (mapping?.active) {
     try {
       // Placeholders só para exibir o formato; bloqueios ficam listados em syonetBlockers.
       syonetPreview = buildSyonetRequest(
-        { ...normalized, media: normalized.media ?? ('<plataforma ausente>' as NormalizedLead['media']) },
+        normalized,
         leadgenId,
         {
           formId: options.formId,

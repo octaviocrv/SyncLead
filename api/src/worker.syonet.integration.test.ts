@@ -174,9 +174,9 @@ test('worker Syonet delivery flow against the simulated Syonet API', {
 
     before = sentBefore();
     const organic = await run('sy-organic-test', 'ok', true);
-    assert.equal(organic.lead.status, 'blocked');
-    assert.match(organic.lead.last_error ?? '', /never sent to Syonet/);
-    assert.equal(syonet.requests.length, before);
+    assert.equal(organic.lead.status, 'sent', 'missing platform/ad_id does not block');
+    assert.equal(syonet.requests.length, before + 1);
+    assert.equal('media' in (syonet.requests.at(-1)?.body as { event: object }).event, false);
   } finally {
     abort?.abort();
     await workerPromise;

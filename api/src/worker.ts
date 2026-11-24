@@ -29,12 +29,12 @@ export interface SyonetSendConfiguration {
 export function syonetConfigurationFor(
   leadgenId: string,
   syonet: SyonetSendConfiguration | undefined,
-  source: PersistedLead['source'] = 'webhook',
   access: { sendHold?: boolean; authorized?: boolean } = {},
 ): SyonetSendConfiguration | undefined {
-  // Lead recuperado pela reconciliação ou em hold só é enviado após autorização explícita de um admin.
+  // Webhook e reconciliação seguem a mesma regra. Só um lead explicitamente retido (send_hold)
+  // precisa de autorização de um admin; a reconciliação não aplica mais hold.
   if (!syonet) return undefined;
-  if (!access.authorized && (source !== 'webhook' || access.sendHold)) return undefined;
+  if (!access.authorized && access.sendHold) return undefined;
   if (syonet.onlyLeadgenIds?.length && !syonet.onlyLeadgenIds.includes(leadgenId)) return undefined;
   return syonet;
 }
@@ -236,7 +236,7 @@ async function processLead(
     console.error(`Could not store personal data for lead ${lead.leadgen_id}:`, error instanceof Error ? error.message : 'unknown error');
   }
 
-  const syonet = syonetConfigurationFor(lead.leadgen_id, workerConfig.syonet, lead.source, {
+  const syonet = syonetConfigurationFor(lead.leadgen_id, workerConfig.syonet, {
     sendHold: lead.send_hold,
     authorized: lead.send_authorized,
   });
@@ -260,7 +260,9 @@ async function processLead(
       );
     }
     if (!syonet) {
-      await updateLead(pool, lead.leadgen_id, 'waiting_config', 'Meta lead retrieved, normalized, and routed; Syonet delivery is disabled.', {
+      await updateLead(pool, lead.leadgen_id, 'waiting_config', lead.send_hold && !lead.send_authorized
+        ? 'Meta lead retrieved, normalized, and routed; held outside automatic sending.'
+        : 'Meta lead retrieved, normalized, and routed; Syonet delivery is disabled.', {
         companyId: mapping.companyId,
         storeAnswer: normalized.storeAnswer,
         stage: 'meta_validation',
@@ -272,15 +274,10 @@ async function processLead(
     if (normalized.organicWithoutPlatform && syonet.onlyLeadgenIds?.length && syonet.homologationMedia) {
       normalized = { ...normalized, media: syonet.homologationMedia, organicWithoutPlatform: false };
     }
-    if (normalized.organicWithoutPlatform) {
-      throw new ProcessingError(
-        'Organic or test lead without platform is never sent to Syonet.',
-        'blocked',
-        'routing',
-      );
-    }
 
-    await updateLead(pool, lead.leadgen_id, 'processing', 'Selected store is mapped to an active Syonet company.', {
+    await updateLead(pool, lead.leadgen_id, 'processing', normalized.media
+      ? 'Selected store is mapped to an active Syonet company.'
+      : 'Selected store is mapped to an active Syonet company; platform not informed by Meta.', {
       companyId: mapping.companyId,
       storeAnswer: normalized.storeAnswer,
       stage: 'routing',
