@@ -50,4 +50,4 @@ export function useLeads(): LeadsState {
   return context;
 }
 
-export const isPending = (lead: Lead) => lead.status === 'pendente' || lead.status === 'erro';
+export const isPending = (lead: Lead) => ['pendente', 'erro', 'incerto', 'revisao'].includes(lead.status);

@@ -28,6 +28,10 @@ interface ApiLead {
   source?: string;
   personalDataCapturedAt: string | null;
   personalDataPurgeAfter: string | null;
+  sendHold?: boolean;
+  sendAuthorizedAt?: string | null;
+  customerCheck?: { result: 'new' | 'existing' | 'unknown'; at: string; by: string } | null;
+  recurrentCount?: number;
   contact?: { name: string | null; phoneMasked: string | null; emailMasked: string | null };
   history: ApiAttempt[];
 }
@@ -46,11 +50,17 @@ export interface LeadDetail {
     missingConfig: string[];
   };
   syonetDelivery: 'enabled' | 'disabled';
+  syonetExchange?: null | { at: string | null; httpStatus: number | null; response?: unknown };
+  reviews?: Array<{ action: string; by: string; eventId: string | null; customerResult: string | null; note: string | null; createdAt: string }>;
+  earlierLeads?: Array<{ leadgenId: string; receivedAt: string; status: string; storeAnswer: string | null; eventId: string | null }>;
 }
 
 export interface DashboardData {
   leads: Lead[];
   syonetDelivery: 'enabled' | 'disabled';
+  syonetExchange?: null | { at: string | null; httpStatus: number | null; response?: unknown };
+  reviews?: Array<{ action: string; by: string; eventId: string | null; customerResult: string | null; note: string | null; createdAt: string }>;
+  earlierLeads?: Array<{ leadgenId: string; receivedAt: string; status: string; storeAnswer: string | null; eventId: string | null }>;
 }
 
 const failedStatuses = new Set(['failed', 'blocked', 'ambiguous', 'retry']);
@@ -79,10 +89,44 @@ function toStatus(lead: ApiLead): LeadStatus {
     case 'sent': return 'enviado';
     case 'processing': return 'processando';
     case 'received': return 'recebido';
-    case 'waiting_config': return lead.metaProcessedAt ? 'validado' : 'pendente';
+    case 'waiting_config':
+      if (!lead.metaProcessedAt) return 'pendente';
+      return (lead.sendHold || lead.source === 'reconciliation') && !lead.sendAuthorizedAt ? 'revisao' : 'validado';
     case 'retry': return 'pendente';
+    case 'ambiguous': return 'incerto';
     default: return 'erro';
   }
+}
+
+// Mensagens técnicas do worker (em inglês, gravadas no banco) apresentadas em português. Desconhecidas passam sem alteração.
+const messageRules: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+  [/^Meta lead notification persisted/, () => 'Notificação recebida da Meta e registrada.'],
+  [/^Complete lead data retrieved from Meta/, () => 'Dados completos do lead obtidos na Meta.'],
+  [/^Lead fields normalized/, () => 'Campos do lead normalizados.'],
+  [/^Selected store is mapped to an active Syonet company/, () => 'Loja escolhida mapeada para uma empresa ativa do Syonet.'],
+  [/^Meta lead retrieved, normalized, and routed; Syonet delivery is disabled/, () => 'Lead validado e roteado. Aguardando o envio ao Syonet (envio desligado).'],
+  [/^Syonet confirmed event creation/, () => 'Syonet confirmou a criação do evento.'],
+  [/^Lead recovered from the Meta form list/, () => 'Recuperado pela conferência com a Meta (o webhook não entregou). Fica em revisão manual.'],
+  [/^Syonet rejected the lead data \(HTTP 412[^)]*\)(.*)\.$/, (m) => `Syonet recusou os dados do lead (412)${m[1]}.`],
+  [/^Syonet authentication failed/, () => 'Falha de autenticação no Syonet (401). Confira usuário e senha.'],
+  [/^Syonet denied the request \(HTTP 403\)/, () => 'Syonet negou a execução (403): o tipo de evento não tem permissão de Web Service.'],
+  [/^Syonet rate-limited/, () => 'Syonet limitou as requisições (429); nova tentativa automática.'],
+  [/manual review is required|outcome is unknown|could not be (read|interpreted)|did not confirm/, () => 'Resultado incerto: o Syonet pode ter criado o evento. Confira no CRM antes de reenviar.'],
+  [/^Worker stopped during processing/, () => 'Processamento interrompido; resultado incerto. Confira no CRM antes de reenviar.'],
+  [/^Selected store "(.*)" is marked inactive/, (m) => `A loja "${m[1]}" está inativa e não foi enviada ao Syonet.`],
+  [/^Selected store is not mapped/, () => 'Loja escolhida não mapeada para uma empresa do Syonet.'],
+  [/^Form ID is not configured/, () => 'Formulário não autorizado para esta integração.'],
+  [/^Organic or test lead without platform/, () => 'Lead de teste ou orgânico, sem plataforma: não é enviado ao Syonet.'],
+  [/^Meta access token/, () => 'Token da Meta inválido ou sem permissão de leads.'],
+  [/^Meta Graph API/, () => 'Falha ao consultar a Meta; nova tentativa automática.'],
+];
+
+export function describeMessage(message: string): string {
+  for (const [pattern, render] of messageRules) {
+    const match = message.match(pattern);
+    if (match) return render(match);
+  }
+  return message;
 }
 
 // Todos os horários do painel em America/Sao_Paulo, independentemente do fuso do navegador.
@@ -98,7 +142,7 @@ function toLead(lead: ApiLead): Lead {
     at: formatDateTime(a.createdAt),
     result: failedStatuses.has(a.status) ? 'falha' : 'sucesso',
     stage: a.stage,
-    message: a.message,
+    message: describeMessage(a.message),
   }));
 
   const platform = lead.metaPlatform === 'fb' ? 'Facebook' : lead.metaPlatform === 'ig' ? 'Instagram' : lead.metaPlatform;
@@ -127,8 +171,12 @@ function toLead(lead: ApiLead): Lead {
     metaProcessedAt: formatDateTime(lead.metaProcessedAt),
     status: toStatus(lead),
     rawStatus: lead.status,
-    lastError: lead.lastError,
+    lastError: lead.lastError ? describeMessage(lead.lastError) : null,
     syonetEventId: lead.syonetEventId,
+    sendHold: Boolean(lead.sendHold) || lead.source === 'reconciliation',
+    sendAuthorized: Boolean(lead.sendAuthorizedAt),
+    customerCheck: lead.customerCheck ?? null,
+    recurrentCount: lead.recurrentCount ?? 0,
     attempts,
   };
 }
@@ -153,6 +201,24 @@ export async function fetchLeadDetail(leadgenId: string, signal?: AbortSignal): 
   if (response.status === 401) notifyUnauthorized();
   if (!response.ok) throw new Error(`API respondeu HTTP ${response.status}.`);
   return (await response.json()) as LeadDetail;
+}
+
+export async function postReview(
+  leadgenId: string,
+  action: 'resolve' | 'authorize-send' | 'customer-check',
+  body: Record<string, unknown>,
+): Promise<string> {
+  // Cabeçalho exigido pela API (proteção CSRF); com SameSite=Strict e JSON, sites de terceiros não conseguem enviar.
+  const response = await fetch(`/api/dashboard/leads/${encodeURIComponent(leadgenId)}/${action}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-synclead-csrf': '1' },
+    body: JSON.stringify(body),
+    credentials: 'same-origin',
+  });
+  if (response.status === 401) notifyUnauthorized();
+  const data = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
+  if (!response.ok) throw new Error(data.error ?? `API respondeu HTTP ${response.status}.`);
+  return data.message ?? 'Registrado.';
 }
 
 export interface HealthAlert {

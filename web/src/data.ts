@@ -1,6 +1,6 @@
 // Lojas e IDs refletem o formulário e a referência do Syonet. Os leads vêm da API (ver api.ts).
 
-export type LeadStatus = 'recebido' | 'processando' | 'validado' | 'enviado' | 'pendente' | 'erro';
+export type LeadStatus = 'recebido' | 'processando' | 'validado' | 'enviado' | 'pendente' | 'incerto' | 'revisao' | 'erro';
 
 export interface Attempt {
   at: string;
@@ -38,6 +38,12 @@ export interface Lead {
   rawStatus: string;
   lastError: string | null;
   syonetEventId: string | null;
+  // Revisão manual (admin): em hold ou recuperado, só sai com autorização.
+  sendHold: boolean;
+  sendAuthorized: boolean;
+  customerCheck: { result: 'new' | 'existing' | 'unknown'; at: string; by: string } | null;
+  // Leads anteriores do mesmo contato no nosso banco (dentro da retenção). Não indica cliente no Syonet.
+  recurrentCount: number;
   attempts: Attempt[];
 }
 
@@ -95,6 +101,8 @@ export const statusLabel: Record<LeadStatus, string> = {
   validado: 'Validado na Meta',
   enviado: 'Enviado ao Syonet',
   pendente: 'Pendente',
+  incerto: 'Resultado incerto',
+  revisao: 'Em revisão',
   erro: 'Erro',
 };
 

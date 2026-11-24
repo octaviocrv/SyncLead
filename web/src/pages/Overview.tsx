@@ -26,7 +26,7 @@ export default function Overview() {
       icon: CheckCircle2,
       tone: 'green',
     },
-    { label: 'Pendências', value: leads.filter(isPending).length, hint: 'Erros ou aguardando retry', icon: AlertCircle, tone: 'red' },
+    { label: 'Pendências', value: leads.filter(isPending).length, hint: 'Erros, resultado incerto ou em revisão', icon: AlertCircle, tone: 'red' },
   ];
 
   return (
