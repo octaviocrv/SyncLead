@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { roleLabel, useAuth } from '../auth';
 import { isPending, useLeads } from '../leads';
+import StorageBanner from './StorageBanner';
 
 const sections = (pendingCount: number, isAdmin: boolean) => [
   {
@@ -85,6 +86,7 @@ export default function Layout() {
       </aside>
 
       <div className="main">
+        <StorageBanner />
         <header className="topbar">
           <label className="search">
             <Search size={15} />

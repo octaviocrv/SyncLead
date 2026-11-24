@@ -266,6 +266,43 @@ export async function fetchHealth(signal?: AbortSignal): Promise<HealthData> {
   return (await response.json()) as HealthData;
 }
 
+export interface StorageData {
+  checkedAt: string;
+  level: 'ok' | 'warning' | 'critical';
+  percent: number;
+  totalBytes: number;
+  usedBytes: number;
+  freeBytes: number;
+  warnPercent: number;
+  criticalPercent: number;
+  postgresBytes: number | null;
+  backupsBytes: number | null;
+  dockerLogsBytes: number | null;
+  dockerImagesBytes: number | null;
+  dockerVolumesBytes: number | null;
+  dockerBuildCacheBytes: number | null;
+  reportAt: string | null;
+}
+
+export async function fetchStorage(signal?: AbortSignal): Promise<StorageData> {
+  const response = await fetch('/api/dashboard/storage', { signal, headers: { accept: 'application/json' }, credentials: 'same-origin' });
+  if (response.status === 401) {
+    notifyUnauthorized();
+    throw new Error('Sessão expirada. Entre novamente.');
+  }
+  if (!response.ok) throw new Error(`API respondeu HTTP ${response.status}.`);
+  return (await response.json()) as StorageData;
+}
+
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null) return 'indisponível';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: unit < 2 ? 0 : 1 })} ${units[unit]}`;
+}
+
 export function storeLabel(answer: string | null, companyId: number | null): string {
   return findStore(answer, companyId)?.name ?? (answer ? `Loja não mapeada (${answer})` : 'Sem loja informada');
 }

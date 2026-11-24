@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
-import { fetchHealth, formatDateTime, type HealthAlert, type HealthData } from '../api';
+import { fetchHealth, fetchStorage, formatBytes, formatDateTime, type HealthAlert, type HealthData, type StorageData } from '../api';
 import { PageHeader, Section } from '../components/ui';
 
 const windowLabel = { '24h': 'Últimas 24 horas', '7d': 'Últimos 7 dias', desde_webhook: 'Desde que o webhook foi ligado' } as const;
@@ -61,13 +61,16 @@ function AlertRow({ alert }: { alert: HealthAlert }) {
 export default function Health() {
   const [data, setData] = useState<HealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [storage, setStorage] = useState<StorageData | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    const load = () =>
-      fetchHealth(controller.signal)
+    const load = () => {
+      void fetchStorage(controller.signal).then(setStorage).catch(() => undefined);
+      return fetchHealth(controller.signal)
         .then((d) => { setData(d); setError(null); })
         .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message); });
+    };
     load();
     const timer = setInterval(load, 30_000);
     return () => { controller.abort(); clearInterval(timer); };
@@ -125,6 +128,27 @@ export default function Health() {
           );
         })}
       </div>
+
+      {storage ? (
+        <Section title="Armazenamento da VPS" subtitle={`Aviso a partir de ${storage.warnPercent}%, crítico acima de ${storage.criticalPercent}%. O que mais ocupa espaço aparece abaixo, quando disponível.`}>
+          <div className={`storage-meter storage-${storage.level}`} role="img" aria-label={`Disco em ${storage.percent}%`}>
+            <span style={{ width: `${Math.min(storage.percent, 100)}%` }} />
+          </div>
+          <dl className="details">
+            <dt>Disco</dt><dd>{formatBytes(storage.usedBytes)} / {formatBytes(storage.totalBytes)} ({storage.percent.toLocaleString('pt-BR')}%) · livre {formatBytes(storage.freeBytes)}</dd>
+            <dt>PostgreSQL</dt><dd>{formatBytes(storage.postgresBytes)}</dd>
+            <dt>Backups</dt><dd>{formatBytes(storage.backupsBytes)}</dd>
+            <dt>Logs do Docker</dt><dd>{formatBytes(storage.dockerLogsBytes)}</dd>
+            <dt>Imagens do Docker</dt><dd>{formatBytes(storage.dockerImagesBytes)}{storage.dockerBuildCacheBytes !== null ? ` · cache de build ${formatBytes(storage.dockerBuildCacheBytes)}` : ''}</dd>
+            <dt>Volumes do Docker</dt><dd>{formatBytes(storage.dockerVolumesBytes)}</dd>
+          </dl>
+          <p className="muted">
+            {storage.reportAt
+              ? `Detalhes do servidor atualizados em ${formatDateTime(storage.reportAt)}.`
+              : 'Detalhes do servidor indisponíveis (relatório do host ausente ou desatualizado); o disco e o PostgreSQL são medidos em tempo real.'}
+          </p>
+        </Section>
+      ) : null}
 
       <Section title="Alertas abertos" subtitle="Vermelho é urgente; amarelo merece atenção.">
         {data.openAlerts.length ? (
