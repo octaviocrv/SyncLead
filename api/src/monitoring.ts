@@ -140,8 +140,8 @@ export async function recoverMissingLeads(pool: Pool, config: MonitoringConfigur
   try {
     await client.query('BEGIN');
     const result = await client.query<{ leadgen_id: string }>(
-      `INSERT INTO leads (leadgen_id, form_id, page_id, ad_id, created_time, status, source)
-       SELECT m.leadgen_id, m.form_id, $1, m.ad_id, EXTRACT(EPOCH FROM m.meta_created_at)::bigint, 'received', 'reconciliation'
+      `INSERT INTO leads (leadgen_id, form_id, page_id, ad_id, created_time, status, source, send_hold)
+       SELECT m.leadgen_id, m.form_id, $1, m.ad_id, EXTRACT(EPOCH FROM m.meta_created_at)::bigint, 'received', 'reconciliation', TRUE
        FROM meta_leads m
        WHERE m.meta_created_at >= $2
          AND m.meta_created_at < NOW() - make_interval(mins => $3)
@@ -153,7 +153,7 @@ export async function recoverMissingLeads(pool: Pool, config: MonitoringConfigur
     for (const row of result.rows) {
       await client.query(
         `INSERT INTO processing_attempts (leadgen_id, stage, status, message) VALUES ($1, 'reconciliation', 'success', $2)`,
-        [row.leadgen_id, 'Lead recovered from the Meta form list (webhook did not deliver it); never sent to Syonet.'],
+        [row.leadgen_id, 'Lead recovered from the Meta form list (webhook did not deliver it); held for manual review, not sent automatically.'],
       );
     }
     await client.query('COMMIT');
@@ -226,8 +226,11 @@ export async function evaluateAlerts(pool: Pool, metaConfigured: boolean, notify
        FROM leads WHERE source = 'reconciliation' AND received_at > NOW() - INTERVAL '24 hours'
      UNION ALL
      SELECT 'processing_errors', array_agg(leadgen_id ORDER BY updated_at), NULL
-       FROM leads WHERE status IN ('failed', 'ambiguous')
+       FROM leads WHERE status = 'failed'
           OR (status = 'blocked' AND COALESCE(last_error, '') NOT LIKE 'Form ID%')
+     UNION ALL
+     SELECT 'ambiguous_results', array_agg(leadgen_id ORDER BY updated_at), NULL
+       FROM leads WHERE status = 'ambiguous'
      UNION ALL
      SELECT 'queue_stuck', array_agg(leadgen_id ORDER BY received_at), NULL
        FROM leads WHERE (status IN ('received', 'retry') AND available_at < NOW() - INTERVAL '10 minutes')
@@ -243,6 +246,7 @@ export async function evaluateAlerts(pool: Pool, metaConfigured: boolean, notify
 
   const missed = ids('webhook_missed');
   const errors = ids('processing_errors');
+  const ambiguous = ids('ambiguous_results');
   const stuck = ids('queue_stuck');
   const forms = ids('unauthorized_form');
   const results = {
@@ -253,8 +257,13 @@ export async function evaluateAlerts(pool: Pool, metaConfigured: boolean, notify
     } : undefined, notify),
     processing_errors: await syncAlert(pool, 'processing_errors', errors.length ? {
       kind: 'processing_errors', severity: 'critical', count: errors.length,
-      title: 'Leads com erro de processamento',
-      message: `${errors.length} lead(s) com erro, bloqueio ou situação ambígua aguardando revisão: ${listIds(errors)}.`,
+      title: 'Leads recusados ou bloqueados',
+      message: `${errors.length} lead(s) com erro ou bloqueio: ${listIds(errors)}. Abra Pendências para ver o motivo de cada um.`,
+    } : undefined, notify),
+    ambiguous_results: await syncAlert(pool, 'ambiguous_results', ambiguous.length ? {
+      kind: 'ambiguous_results', severity: 'critical', count: ambiguous.length,
+      title: 'Resultado incerto no Syonet',
+      message: `${ambiguous.length} lead(s) sem confirmação do Syonet: ${listIds(ambiguous)}. O evento pode ou não ter sido criado: confira no CRM e registre o resultado em Pendências (não reenvie sem conferir).`,
     } : undefined, notify),
     queue_stuck: await syncAlert(pool, 'queue_stuck', stuck.length ? {
       kind: 'queue_stuck', severity: 'critical', count: stuck.length,
