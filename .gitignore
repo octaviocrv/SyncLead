@@ -1,0 +1,32 @@
+# Variáveis de ambiente e segredos (versionar só os exemplos)
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+*.key
+.credenciais*
+
+# Documento interno com senhas de acesso
+ACESSOS.md
+
+# Dependências e builds
+node_modules/
+dist/
+web-dist/
+
+# Backups do banco (contêm dados pessoais)
+backups/
+*.sql
+*.sql.gz
+*.dump
+
+# Arquivos locais e temporários
+package-lock.json
+!api/package-lock.json
+!web/package-lock.json
+*.log
+*.tmp
+.DS_Store
+.vscode/
+.idea/
