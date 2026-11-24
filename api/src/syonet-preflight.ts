@@ -5,6 +5,7 @@
 import { config } from './config.js';
 import { createPool } from './database.js';
 import { getDashboardLeadDetail } from './dashboard.js';
+import type { SessionUser } from './auth.js';
 import { buildSyonetAuthHeaders, type SyonetAuthConfiguration } from './worker.js';
 
 const problems: string[] = [];
@@ -38,8 +39,13 @@ console.log(authOk ? 'Autenticação aceita (corpo vazio rejeitado na validaçã
 
 const pool = createPool(config.databaseUrl);
 try {
+  const adminRow = await pool.query<SessionUser>(
+    `SELECT id, email, name, role FROM app_users WHERE role = 'admin' AND active ORDER BY id LIMIT 1`,
+  );
+  const admin = adminRow.rows[0];
+  if (!admin) throw new Error('Nenhum admin ativo para consultar o lead.');
   for (const leadgenId of config.syonetSendOnlyLeadgenIds) {
-    const detail = await getDashboardLeadDetail(pool, leadgenId, { remoteAddr: 'syonet-preflight' }, {
+    const detail = await getDashboardLeadDetail(pool, leadgenId, { remoteAddr: 'syonet-preflight', user: admin }, {
       formId: config.metaFormId,
       eventGroup: config.syonetEventGroup,
       eventType: config.syonetEventType,

@@ -111,6 +111,10 @@ if (config.syonetHomologationMedia && config.syonetSendOnlyLeadgenIds.length ===
   throw new Error('SYONET_HOMOLOGATION_MEDIA requires SYONET_SEND_ONLY_LEADGEN_IDS.');
 }
 
+if (parseBoolean('SYONET_REQUIRE_ALLOWLIST', false) && config.syonetSendEnabled && config.syonetSendOnlyLeadgenIds.length === 0) {
+  throw new Error('SYONET_REQUIRE_ALLOWLIST=true requires SYONET_SEND_ONLY_LEADGEN_IDS when Syonet sending is enabled.');
+}
+
 export const metaProcessingConfigured = Boolean(config.metaPageAccessToken);
 
 function getSyonetSendConfiguration() {
