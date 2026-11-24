@@ -96,6 +96,18 @@ chmod +x deploy/backup.sh && ./deploy/backup.sh   # backup do banco
 ```
 
 Agendar o backup diário: `0 3 * * * /opt/cacl-leads/deploy/backup.sh` no `crontab -e`.
+
+### Monitoramento de disco
+
+A API mede o disco da VPS e o tamanho do PostgreSQL a cada 5 minutos: aviso amarelo de 70% a 85% e
+alerta crítico acima de 85% (faixa no topo do painel, alerta em Saúde e Telegram, se configurado).
+Limites: `STORAGE_WARN_PERCENT` (70) e `STORAGE_CRITICAL_PERCENT` (85). Para mostrar também backups, logs e
+imagens do Docker, agende como root o relatório do host (a API lê `/opt/cacl-leads/storage/report.json`
+em somente leitura; sem ele, só disco e PostgreSQL aparecem):
+
+```
+*/15 * * * * /opt/cacl-leads/deploy/storage-report.sh
+```
 Copie os backups para fora da VPS periodicamente.
 
 ## Variáveis a preencher

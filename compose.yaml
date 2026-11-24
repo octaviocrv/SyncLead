@@ -36,6 +36,9 @@ services:
       postgres:
         condition: service_healthy
     env_file: .env
+    volumes:
+      # Relatório de disco gravado no host por deploy/storage-report.sh (somente leitura).
+      - ./storage:/host-report:ro
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
