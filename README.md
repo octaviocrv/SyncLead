@@ -5,8 +5,9 @@ Instagram), grava cada lead no PostgreSQL, busca os dados completos na Graph API
 normaliza os campos, define a loja de destino e mostra tudo em um painel para o
 gestor de tráfego acompanhar as campanhas.
 
-O envio ao CRM Syonet está implementado e foi homologado para a VW Lavras, mas fica
-**desligado** (`SYONET_SEND_ENABLED=false`) até a ativação autorizada pelo cliente.
+O envio ao CRM Syonet foi homologado para a VW Lavras e é controlado por
+`SYONET_SEND_ENABLED` no `.env` (desligado se a variável não existir). Em produção está
+**ligado desde 24/11/2026** para validação com leads reais.
 
 ## Como funciona
 
@@ -15,7 +16,7 @@ Meta Lead Ads ──webhook──▶ API (valida assinatura, grava e responde)
                               │
                               ▼
                         PostgreSQL ◀── worker: Graph API → normalização → loja/companyId
-                              │                      └─▶ Syonet (desligado)
+                              │                      └─▶ Syonet (se ligado)
                               ▼
                      Painel web (login, leads, métricas, saúde)
 ```
@@ -156,7 +157,7 @@ Fluxo de deploy: `deploy/backup.sh` → copiar os arquivos → `docker compose b
 | `GET /api/dashboard/leads`, `/leads/:id`, `/stats`, `/health` | Dados do painel (exigem sessão) |
 | `POST /api/dashboard/leads/:id/resolve`, `/authorize-send`, `/customer-check` | Revisão manual: só `admin`, JSON, cabeçalho `x-synclead-csrf: 1`; a linha do lead é travada na transação |
 
-## Envio ao Syonet (desligado)
+## Envio ao Syonet
 
 Endpoint documentado: `POST <instância>/api/lead` com `SYONET_AUTH_MODE=basic`
 (`apikey` segue disponível). Detalhes e evidências da homologação:
