@@ -25,6 +25,7 @@ export interface Lead {
   // Sem ad_id: lead de teste/orgânico, fora das métricas.
   isTest: boolean;
   recovered?: boolean;
+  companyId: number | null;
   origin: string;
   storeAnswer: string;
   store: string;
@@ -98,11 +99,11 @@ export const formStoreMappings: FormStoreMapping[] = [
 export const statusLabel: Record<LeadStatus, string> = {
   recebido: 'Recebido',
   processando: 'Processando',
-  validado: 'Validado na Meta',
-  enviado: 'Enviado ao Syonet',
-  pendente: 'Pendente',
-  incerto: 'Resultado incerto',
-  revisao: 'Em revisão',
+  validado: 'Recebido',
+  enviado: 'Enviado',
+  pendente: 'Processando',
+  incerto: 'Envio não confirmado',
+  revisao: 'Retido',
   erro: 'Erro',
 };
 

@@ -10,11 +10,11 @@ const queueLabel: Record<string, string> = {
   received: 'Na fila',
   processing: 'Processando',
   retry: 'Aguardando nova tentativa',
-  waiting_config: 'Processado (Syonet desligado)',
+  waiting_config: 'Processado (aguardando envio ou retido)',
   sent: 'Enviado ao Syonet',
   failed: 'Falhou',
   blocked: 'Bloqueado',
-  ambiguous: 'Resultado incerto',
+  ambiguous: 'Envio não confirmado',
 };
 
 type Tone = 'ok' | 'warn' | 'bad' | 'idle';

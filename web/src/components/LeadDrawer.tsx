@@ -34,7 +34,7 @@ function PersonalData({ detail }: { detail: LeadDetail }) {
           <dt>Telefone</dt><dd>{n.phone}</dd>
           <dt>E-mail</dt><dd>{n.email}</dd>
           <dt>Loja (resposta)</dt><dd>{n.storeAnswer}</dd>
-          <dt>Mídia</dt><dd>{n.media ?? (n.organicWithoutPlatform ? 'Sem plataforma (orgânico/teste)' : '—')}</dd>
+          <dt>Mídia</dt><dd>{n.media ?? (n.organicWithoutPlatform ? 'Não informada pela Meta' : '—')}</dd>
         </dl>
       ) : (
         <p className="error-text">Falha na normalização: {data.normalizationError}</p>
@@ -81,11 +81,11 @@ function SendResult({ lead, detail }: { lead: Lead; detail: LeadDetail | null })
   switch (lead.rawStatus) {
     case 'sent':
       tone = 'ok';
-      text = `Enviado ao Syonet. Evento ${lead.syonetEventId ?? '—'} · ${lead.store}.`;
+      text = `Enviado com sucesso ao Syonet. Evento ${lead.syonetEventId ?? '—'} · ${lead.store}${lead.companyId != null ? ` (companyId ${lead.companyId})` : ''}.`;
       break;
     case 'ambiguous':
       tone = 'bad';
-      text = 'Resultado incerto: o Syonet pode ou não ter criado o evento. Confira no CRM antes de reenviar.';
+      text = 'Envio não confirmado: o Syonet pode ou não ter criado o evento. Confira no CRM antes de reenviar.';
       break;
     case 'failed':
     case 'blocked':
@@ -93,9 +93,9 @@ function SendResult({ lead, detail }: { lead: Lead; detail: LeadDetail | null })
       text = lead.lastError ?? 'O lead não foi enviado.';
       break;
     case 'waiting_config':
-      if (lead.status === 'revisao') text = 'Em revisão manual: não será enviado ao Syonet sem autorização de um administrador.';
+      if (lead.status === 'revisao') text = 'Retido fora do envio automático (exceção): só será enviado com autorização de um administrador.';
       else if (lead.sendAuthorized) text = 'Envio autorizado. Sai quando o envio ao Syonet estiver ligado.';
-      else text = detail?.syonetDelivery === 'enabled' ? 'Validado. Na fila para envio ao Syonet.' : 'Validado e roteado. O envio ao Syonet está desligado.';
+      else text = detail?.syonetDelivery === 'enabled' ? 'Recebido e validado. Na fila para envio automático ao Syonet.' : 'Recebido e validado. O envio ao Syonet está desligado no momento.';
       break;
     default:
       text = 'Em processamento.';
@@ -171,7 +171,7 @@ function ReviewPanel({ lead, onDone }: { lead: Lead; onDone: () => void }) {
 
   return (
     <>
-      <h3>Revisão</h3>
+      <h3>Tratamento de exceção</h3>
       <div className="review-panel">
         {ambiguous && (
           <>
@@ -273,14 +273,16 @@ export default function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClo
             <dt>Anúncio</dt><dd>{lead.adId ?? '—'}</dd>
             <dt>Plataforma</dt><dd>{lead.platform ?? 'Não informada pela Meta'}</dd>
             <dt>Criado na Meta</dt><dd>{lead.metaCreatedAt}</dd>
-            <dt>Webhook recebido</dt><dd>{lead.receivedAt}</dd>
+            <dt>Recebido pela plataforma</dt><dd>{lead.receivedAt}</dd>
             <dt>Dados lidos na Meta</dt><dd>{lead.metaProcessedAt}</dd>
           </dl>
 
           <h3>Roteamento</h3>
           <dl className="details">
             <dt>Loja escolhida</dt><dd>{lead.storeAnswer}</dd>
+            <dt>Captura</dt><dd>{lead.recovered ? 'Conferência com a Meta (o webhook não entregou)' : 'Webhook'}</dd>
             <dt>Destino</dt><dd>{lead.store}</dd>
+            <dt>companyId</dt><dd>{lead.companyId ?? '—'}</dd>
             <dt>Regra aplicada</dt><dd>{lead.rule}</dd>
             <dt>Evento Syonet</dt><dd>{lead.syonetEventId ?? '—'}</dd>
             {lead.lastError ? (<><dt>Última mensagem</dt><dd>{lead.lastError}</dd></>) : null}

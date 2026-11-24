@@ -14,9 +14,9 @@ export default function Pending() {
   const count = (s: LeadStatus) => all.filter((l) => l.status === s).length;
   const chips: Array<['todas' | LeadStatus, string, number]> = [
     ['todas', 'Todas', all.length],
-    ['incerto', 'Resultado incerto', count('incerto')],
+    ['incerto', 'Envio não confirmado', count('incerto')],
     ['erro', 'Recusados / erro', count('erro')],
-    ['revisao', 'Em revisão', count('revisao')],
+    ['revisao', 'Retidos', count('revisao')],
     ['pendente', 'Nova tentativa', count('pendente')],
   ];
   const selected: Lead | null = leads.find((l) => l.id === selectedId) ?? null;

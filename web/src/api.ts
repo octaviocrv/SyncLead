@@ -90,9 +90,9 @@ function toStatus(lead: ApiLead): LeadStatus {
     case 'processing': return 'processando';
     case 'received': return 'recebido';
     case 'waiting_config':
-      if (!lead.metaProcessedAt) return 'pendente';
-      return (lead.sendHold || lead.source === 'reconciliation') && !lead.sendAuthorizedAt ? 'revisao' : 'validado';
-    case 'retry': return 'pendente';
+      // 'Retido' só existe para leads explicitamente em hold (exceção); o fluxo normal não tem aprovação manual.
+      return lead.sendHold && !lead.sendAuthorizedAt ? 'revisao' : 'recebido';
+    case 'retry': return 'processando';
     case 'ambiguous': return 'incerto';
     default: return 'erro';
   }
@@ -104,19 +104,23 @@ const messageRules: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^Complete lead data retrieved from Meta/, () => 'Dados completos do lead obtidos na Meta.'],
   [/^Lead fields normalized/, () => 'Campos do lead normalizados.'],
   [/^Selected store is mapped to an active Syonet company/, () => 'Loja escolhida mapeada para uma empresa ativa do Syonet.'],
-  [/^Meta lead retrieved, normalized, and routed; Syonet delivery is disabled/, () => 'Lead validado e roteado. Aguardando o envio ao Syonet (envio desligado).'],
-  [/^Syonet confirmed event creation/, () => 'Syonet confirmou a criação do evento.'],
-  [/^Lead recovered from the Meta form list/, () => 'Recuperado pela conferência com a Meta (o webhook não entregou). Fica em revisão manual.'],
+  [/^Meta lead retrieved, normalized, and routed; Syonet delivery is disabled/, () => 'Lead validado e roteado. O envio ao Syonet estava desligado quando foi processado.'],
+  [/^Meta lead retrieved, normalized, and routed; held outside automatic sending/, () => 'Lead validado e roteado, mas retido fora do envio automático.'],
+  [/^Selected store is mapped to an active Syonet company; platform not informed by Meta/, () => 'Loja mapeada. Origem detalhada (plataforma/anúncio) não informada pela Meta: segue sem mídia.'],
+  [/^Resultado ".*" descartado/, () => 'Um resultado tardio foi descartado porque o lead já havia mudado de estado (verifique o evento no CRM).'],
+  [/^Syonet confirmed event creation/, () => 'Enviado com sucesso ao Syonet.'],
+  [/^Lead recovered from the Meta form list.*held for manual review/, () => 'Recuperado pela conferência com a Meta (o webhook não entregou). Retido em revisão manual.'],
+  [/^Lead recovered from the Meta form list/, () => 'Recuperado automaticamente pela conferência com a Meta (o webhook não entregou).'],
   [/^Syonet rejected the lead data \(HTTP 412[^)]*\)(.*)\.$/, (m) => `Syonet recusou os dados do lead (412)${m[1]}.`],
   [/^Syonet authentication failed/, () => 'Falha de autenticação no Syonet (401). Confira usuário e senha.'],
   [/^Syonet denied the request \(HTTP 403\)/, () => 'Syonet negou a execução (403): o tipo de evento não tem permissão de Web Service.'],
   [/^Syonet rate-limited/, () => 'Syonet limitou as requisições (429); nova tentativa automática.'],
-  [/manual review is required|outcome is unknown|could not be (read|interpreted)|did not confirm/, () => 'Resultado incerto: o Syonet pode ter criado o evento. Confira no CRM antes de reenviar.'],
-  [/^Worker stopped during processing/, () => 'Processamento interrompido; resultado incerto. Confira no CRM antes de reenviar.'],
+  [/manual review is required|outcome is unknown|could not be (read|interpreted)|did not confirm/, () => 'Não foi possível confirmar se o evento foi criado no Syonet. Confira no CRM antes de reenviar.'],
+  [/^Worker stopped during processing/, () => 'Processamento interrompido: não foi possível confirmar se o evento foi criado. Confira no CRM antes de reenviar.'],
   [/^Selected store "(.*)" is marked inactive/, (m) => `A loja "${m[1]}" está inativa e não foi enviada ao Syonet.`],
   [/^Selected store is not mapped/, () => 'Loja escolhida não mapeada para uma empresa do Syonet.'],
   [/^Form ID is not configured/, () => 'Formulário não autorizado para esta integração.'],
-  [/^Organic or test lead without platform/, () => 'Lead de teste ou orgânico, sem plataforma: não é enviado ao Syonet.'],
+  [/^Syonet rejected the lead \(HTTP/, () => 'Syonet retornou erro e recusou o lead.'],
   [/^Meta access token/, () => 'Token da Meta inválido ou sem permissão de leads.'],
   [/^Meta Graph API/, () => 'Falha ao consultar a Meta; nova tentativa automática.'],
 ];
@@ -160,7 +164,10 @@ function toLead(lead: ApiLead): Lead {
     adId: lead.adId,
     isTest: lead.isTest,
     recovered: lead.source === 'reconciliation',
-    origin: [lead.adId ? 'Anúncio' : 'Teste / orgânico', platform].filter(Boolean).join(' · '),
+    companyId: lead.syonetCompanyId,
+    origin: lead.adId || platform
+      ? [lead.adId ? 'Anúncio' : null, platform].filter(Boolean).join(' · ')
+      : 'Origem detalhada não informada pela Meta',
     storeAnswer: lead.selectedStoreAnswer ?? '—',
     store: store?.name ?? (lead.metaProcessedAt ? 'Loja não mapeada' : 'Aguardando dados da Meta'),
     city: store?.city ?? '—',
@@ -171,9 +178,11 @@ function toLead(lead: ApiLead): Lead {
     metaProcessedAt: formatDateTime(lead.metaProcessedAt),
     status: toStatus(lead),
     rawStatus: lead.status,
-    lastError: lead.lastError ? describeMessage(lead.lastError) : null,
+    lastError: lead.status === 'waiting_config' && lead.sendHold && !lead.sendAuthorizedAt
+      ? 'Retido fora do envio automático: só sai com autorização de um administrador.'
+      : lead.lastError ? describeMessage(lead.lastError) : null,
     syonetEventId: lead.syonetEventId,
-    sendHold: Boolean(lead.sendHold) || lead.source === 'reconciliation',
+    sendHold: Boolean(lead.sendHold),
     sendAuthorized: Boolean(lead.sendAuthorizedAt),
     customerCheck: lead.customerCheck ?? null,
     recurrentCount: lead.recurrentCount ?? 0,
