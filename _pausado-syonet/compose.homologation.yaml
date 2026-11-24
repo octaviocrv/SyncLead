@@ -1,0 +1,7 @@
+# Homologação controlada do Syonet. Use SOMENTE via deploy/syonet-homologation.sh.
+# Liga o envio, mas a API recusa subir sem SYONET_SEND_ONLY_LEADGEN_IDS.
+services:
+  api:
+    environment:
+      SYONET_SEND_ENABLED: "true"
+      SYONET_REQUIRE_ALLOWLIST: "true"
